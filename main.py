@@ -11,6 +11,7 @@ CERRADO = 1
 ABRIENDO = 2
 CERRANDO = 3
 DETENIDO = 4
+FALLA_MECANICA = 5
 
 ABRIR = 0
 CERRAR = 1
@@ -60,6 +61,8 @@ def estadoACadena (estado):
         ret = "Cerrando"
     elif estado == DETENIDO:
         ret = "Detenido"
+    elif estado == FALLA_MECANICA:
+        ret = "Falla mecanica"
     else:
         ret = "ERROR"
     
@@ -67,6 +70,14 @@ def estadoACadena (estado):
 
 def calcularEstado (distSensA, distSensC, difAct, difAnt):
     global estado
+
+    print("Distancias")
+    print(distSensA)
+    print(distSensC)
+    print(difAct)
+    print(difAnt)
+
+    print("Estado")
 
     # Logica de obstrucciones
     if (estado == ABRIENDO or estado == CERRANDO):
@@ -80,6 +91,12 @@ def calcularEstado (distSensA, distSensC, difAct, difAnt):
             releMotorC.value(0)
             estado = DETENIDO
             print(estado)
+
+        if (difAct == difAnt and estado != DETENIDO):
+            releMotorA.value(0)
+            releMotorC.value(0)
+            estado = FALLA_MECANICA
+            print(estado)           
 
     if (estado == DETENIDO):
         time.sleep_ms(1000)
@@ -204,8 +221,8 @@ while True:
         else:
             calcularEstado(distSensA, distSensC, difActSensC, difAntSensC)
 
-        print(comando)
-        print(estadoACadena(estado))
+        #print(comando)
+        #print(estadoACadena(estado))
 
         estadoActual = estadoACadena(estado)
 
@@ -220,6 +237,11 @@ while True:
         if color != ultimoColorPublicado:
             conexionMQTT.publish(topicoLuz, color)
             ultimoColorPublicado = color
+
+        if estadoActual == "Falla mecanica":
+            print("Falla mecanica del porton")
+            time.sleep(5)
+            machine.reset()            
 
         distAntSensA = distSensA
         distAntSensC = distSensC
