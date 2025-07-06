@@ -24,7 +24,7 @@ sensorC = HCSR04(trigger_pin=3, echo_pin=2)
 releMotorA = Pin(4, Pin.OUT)
 releMotorC = Pin(5, Pin.OUT)
 
-comando = CERRAR
+comando = None
 estado = ABIERTO
 
 distAntSensA = 0
@@ -32,19 +32,23 @@ distAntSensC = 0
 difAntSensA = 0
 difAntSensC = 0
 
+ultimoEstadoPublicado = None
+ultimoColorPublicado = None
+
 def funcionCallback(topic, msg):
     global comando
+
     data = msg.decode("utf-8")
     topicData = topic.decode("utf-8")
 
-    print("Mensaje recibido del topico:" + topicData + " mensaje: " + data)
+    print("Mensaje recibido del topico: " + topicData + " mensaje: " + data)
 
     if (topicData == topicoPorton and "Abrir" in data):
         comando = ABRIR
     else:
         comando = CERRAR
 
-def estadoACadena(estado):
+def estadoACadena (estado):
 
     if estado == ABIERTO:
         ret = "Abierto"
@@ -124,6 +128,23 @@ def calcularEstado (distSensA, distSensC, difAct, difAnt):
         estado = CERRADO
         print(estado)
 
+def asignarColorDeEstado (estado):
+    color = ""
+
+    if estado == DETENIDO:
+        color = "#FFFF00"
+    elif estado == ABIERTO:
+        color = "#00FF00"
+    elif estado == CERRADO:
+        color = "#FF0000"
+    elif estado == ABRIENDO:
+        color = "#90EE90"
+    elif estado == CERRANDO:
+        color = "#FF7F7F"
+    else:
+        color = "error"
+
+    return color
 
 # Logica de conexion a internet
 
@@ -152,6 +173,7 @@ password = ""
 clientID = "MiPortonIOT"
 topicoPorton = "Due_Ad/feeds/AbrirCerrarPorton"
 topicoEstado = "Due_Ad/feeds/EstadoDelPorton"
+topicoLuz = "Due_Ad/feeds/ColorLed"
 
 try:
     conexionMQTT = MQTTClient(clientID, mqttServer, user = user, password = password, port = int(port))
@@ -185,7 +207,19 @@ while True:
         print(comando)
         print(estadoACadena(estado))
 
-        conexionMQTT.publish(topicoEstado, estadoACadena(estado))
+        estadoActual = estadoACadena(estado)
+
+        # Pulicar estado al dashboard
+        if estadoActual != ultimoEstadoPublicado:
+            conexionMQTT.publish(topicoEstado, estadoActual)
+            ultimoEstadoPublicado = estadoActual
+
+        color = asignarColorDeEstado(estado)
+
+        # Publicar el color al dashboard
+        if color != ultimoColorPublicado:
+            conexionMQTT.publish(topicoLuz, color)
+            ultimoColorPublicado = color
 
         distAntSensA = distSensA
         distAntSensC = distSensC
