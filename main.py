@@ -37,9 +37,9 @@ def funcionCallback(topic, msg):
     data = msg.decode("utf-8")
     topicData = topic.decode("utf-8")
 
-    print("Mensaje recibido del topico:"+topicData+" mensaje: "+data)
+    print("Mensaje recibido del topico:" + topicData + " mensaje: " + data)
 
-    if data == "Abrir" and topicData == topicoPorton:
+    if (topicData == topicoPorton and "Abrir" in data):
         comando = ABRIR
     else:
         comando = CERRAR
@@ -124,7 +124,8 @@ def calcularEstado (distSensA, distSensC, difAct, difAnt):
         estado = CERRADO
         print(estado)
 
-#Logica de conexion a internet
+
+# Logica de conexion a internet
 
 ssid = "Wokwi-GUEST"
 wifiPassword = ''
@@ -145,44 +146,46 @@ print(staIf.ifconfig())
 
 mqttServer = "io.adafruit.com"
 port = 1883
-user = "Due_Ad" #A rellenar
-password =  "aio_kIiF04KmqUbeT0NSZ2VPM5kM0hoX" #A rellenar
+user = "Due_Ad"
+password = ""
 
-clientID = "MiPortonIOT" #A rellenar
-topicoPorton = "Due_Ad/feeds/abrircerrarporton"
-topicoEstado = "Due_Ad/feeds/estadodelporton"
+clientID = "MiPortonIOT"
+topicoPorton = "Due_Ad/feeds/AbrirCerrarPorton"
+topicoEstado = "Due_Ad/feeds/EstadoDelPorton"
 
 try:
     conexionMQTT = MQTTClient(clientID, mqttServer, user = user, password = password, port = int(port))
-    conexionMQTT.set_callback(funcionCallback) # A rellenar
+    conexionMQTT.set_callback(funcionCallback)
     conexionMQTT.connect()
-    conexionMQTT.subscribe(topicoPorton) # A rellenar
+    conexionMQTT.subscribe(topicoPorton)
     print("Conectado con broker MQTT")
 except OSError as e:
-    print("Error de conexion: "+e)
+    print("Error de conexion: ", e)
     time.sleep(5)
     machine.reset()
 
 
 while True:
-    time.sleep_ms(500)
+    time.sleep_ms(1000)
 
     try:
         conexionMQTT.check_msg()
+
         distSensA = round(sensorA.distance_cm())
         distSensC = round(sensorC.distance_cm())
 
         difActSensA = abs(distAntSensA - distSensA) 
         difActSensC = abs(distAntSensC - distSensC) 
 
-        print(comando)
-
-        conexionMQTT.publish(topicoEstado, estadoACadena(estado), retain = False, qos = 1)
-
         if (comando == ABRIR):
             calcularEstado(distSensA, distSensC, difActSensA, difAntSensA)
         else:
             calcularEstado(distSensA, distSensC, difActSensC, difAntSensC)
+
+        print(comando)
+        print(estadoACadena(estado))
+
+        conexionMQTT.publish(topicoEstado, estadoACadena(estado))
 
         distAntSensA = distSensA
         distAntSensC = distSensC
@@ -190,6 +193,6 @@ while True:
         difAntSensC = difActSensC
 
     except OSError as e:
-        print("Error de conexion: "+e)
+        print("Error de conexion: ", e)
         time.sleep(5)
         machine.reset()
