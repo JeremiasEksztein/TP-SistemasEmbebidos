@@ -6,11 +6,12 @@ from machine import Pin
 from hcsr04 import HCSR04
 import time
 
+# Definiciones de constantes
 ABIERTO = 0
 CERRADO = 1
 ABRIENDO = 2
 CERRANDO = 3
-DETENIDO = 4
+OBSTRUIDO = 4
 FALLA_MECANICA = 5
 
 ABRIR = 0
@@ -20,13 +21,17 @@ FACTOR_DIFERENCIA = 4
 DIST_DETECCION_PORTON = 5
 DIST_DETECCION_OBSTRUCCION = 20
 
+# Sensores y actuadores
 sensorA = HCSR04(trigger_pin=1, echo_pin=0)
 sensorC = HCSR04(trigger_pin=3, echo_pin=2)
 releMotorA = Pin(4, Pin.OUT)
 releMotorC = Pin(5, Pin.OUT)
 
+# Variables
 comando = None
-estado = ABIERTO
+estado = None
+
+tEstatico = 0
 
 distAntSensA = 0
 distAntSensC = 0
@@ -36,6 +41,7 @@ difAntSensC = 0
 ultimoEstadoPublicado = None
 ultimoColorPublicado = None
 
+# Funciones
 def funcionCallback(topic, msg):
     global comando
 
@@ -59,47 +65,64 @@ def estadoACadena (estado):
         ret = "Abriendo"
     elif estado == CERRANDO:
         ret = "Cerrando"
-    elif estado == DETENIDO:
-        ret = "Detenido"
+    elif estado == OBSTRUIDO:
+        ret = "Obstruido"
     elif estado == FALLA_MECANICA:
-        ret = "Falla mecanica"
+        ret = "Falla mecánica"
     else:
         ret = "ERROR"
     
     return ret
 
-def calcularEstado (distSensA, distSensC, difAct, difAnt):
+def manejarFallaMecanica (distSensA, distSensC, distAntSensA, distAntSensC):
+
     global estado
+    global tEstatico
 
-    print("Distancias")
-    print(distSensA)
-    print(distSensC)
-    print(difAct)
-    print(difAnt)
-
-    print("Estado")
-
-    # Logica de obstrucciones
     if (estado == ABRIENDO or estado == CERRANDO):
 
-        # En la primer lectura, difAnt = 0 pero difAct > 0, por lo que activará el estado detenido.
+        # Cada segundo que el porton queda en la misma posición respecto a los sensores
+        # se suma uno al contador tEstatico
+        if (distSensA == distAntSensA and distSensC == distAntSensC):
+            tEstatico = tEstatico +1
+        else:
+            tEstatico = 0
+
+        print("Tiempo estatico:", tEstatico, "s")
+
+        # Al llegar a 10 segundos se estancamiento del portón, se asume una falla mecánica
+        if (tEstatico == 10):
+            releMotorA.value(0)
+            releMotorC.value(0)
+            estado = FALLA_MECANICA
+            print(estado)  
+
+def manejarObstruccion (distSensA, distSensC, distAntSensA, distAntSensC):
+
+    global estado, difActSensA, difAntSensA, difActSensC, difAntSensC
+
+    difActSensA = abs(distAntSensA - distSensA)
+    difActSensC = abs(distAntSensC - distSensC)
+
+    # Detección de obstrucciones
+    if (estado == ABRIENDO or estado == CERRANDO):
+
+        # Usa las diferencias del sensor que necesita, ya sea al abrir o cerrar
+        difAct = difActSensA if estado == ABRIENDO else difActSensC
+        difAnt = difAntSensA if estado == ABRIENDO else difAntSensC
+
+        # En la primer lectura, difAnt = 0 pero difAct > 0, por lo que activará el estado obstruido.
         # Para evitar esto, no se realiza la verificación en la primer lectura. Esto se puede hacer
         # sin vulnerar el mecanismo de seguridad ya que antes de iniciar el movimiento verifica
         # si hay obstrucciones.
         if (difAnt > 0 and difAct > difAnt * FACTOR_DIFERENCIA):
             releMotorA.value(0)
             releMotorC.value(0)
-            estado = DETENIDO
+            estado = OBSTRUIDO
             print(estado)
 
-        if (difAct == difAnt and estado != DETENIDO):
-            releMotorA.value(0)
-            releMotorC.value(0)
-            estado = FALLA_MECANICA
-            print(estado)           
-
-    if (estado == DETENIDO):
-        time.sleep_ms(1000)
+    # Manejo de obstrucciones
+    if (estado == OBSTRUIDO):
 
         if (comando == CERRAR and distSensC > DIST_DETECCION_OBSTRUCCION):
             releMotorC.value(1)
@@ -111,6 +134,13 @@ def calcularEstado (distSensA, distSensC, difAct, difAnt):
             estado = ABRIENDO
             print(estado)
 
+    difAntSensA = difActSensA
+    difAntSensC = difActSensC
+
+def manejarAperturaCierre (distSensA, distSensC):
+    global estado
+    global tEstatico
+
     # Funcionalidad base de apertura y cierre
     if (estado == ABIERTO and comando == CERRAR and distSensA < DIST_DETECCION_PORTON):
         
@@ -119,7 +149,7 @@ def calcularEstado (distSensA, distSensC, difAct, difAnt):
             releMotorC.value(1)
         else:
             releMotorC.value(0)
-            estado = DETENIDO
+            estado = OBSTRUIDO
 
         print(estado)
 
@@ -130,7 +160,7 @@ def calcularEstado (distSensA, distSensC, difAct, difAnt):
             releMotorA.value(1)
         else:
             releMotorA.value(0)
-            estado = DETENIDO
+            estado = OBSTRUIDO
             
         print(estado)
 
@@ -138,17 +168,54 @@ def calcularEstado (distSensA, distSensC, difAct, difAnt):
     if (estado == ABRIENDO and distSensA < DIST_DETECCION_PORTON):
         releMotorA.value(0)
         estado = ABIERTO
+        tEstatico = 0
         print(estado)
 
     if (estado == CERRANDO and distSensC < DIST_DETECCION_PORTON):
         releMotorC.value(0)
         estado = CERRADO
+        tEstatico = 0
         print(estado)
+
+def calcularEstadoGuardado ():
+
+    global comando 
+
+    distSensA = round(sensorA.distance_cm())
+    distSensC = round(sensorC.distance_cm())
+    estado = None
+
+    # Si detecta el porton en las posiciones de apertura o cierre, ya asigna el estado
+    if (distSensA < DIST_DETECCION_PORTON):
+        estado = ABIERTO
+
+    elif (distSensC < DIST_DETECCION_PORTON):
+        estado = CERRADO
+
+    # Si no esta en las posiciones de cierre pero se detecta una obstrucción, se asigna el estado
+    # y se asigna el comando de cierre por defecto (no se puede obtener el último valor del tópico,
+    # el broker MQTT no lo reenvía al suscribirse).
+    elif (distSensC < DIST_DETECCION_OBSTRUCCION):
+        comando = CERRAR
+        estado = OBSTRUIDO
+
+    # Si queda en el medio pero no esta obstruido, intenta cerrarse por defecto.
+    else:
+        comando = CERRAR
+        estado = CERRANDO
+        releMotorC.value(1)
+
+    return estado
+
+def calcularEstadoActual (distSensA, distSensC, distAntSensA, distAntSensC):
+    manejarFallaMecanica (distSensA, distSensC, distAntSensA, distAntSensC)
+    manejarObstruccion (distSensA, distSensC, distAntSensA, distAntSensC)
+    manejarAperturaCierre (distSensA, distSensC) 
 
 def asignarColorDeEstado (estado):
     color = ""
 
-    if estado == DETENIDO:
+    if estado == OBSTRUIDO or estado == FALLA_MECANICA:
         color = "#FFFF00"
     elif estado == ABIERTO:
         color = "#00FF00"
@@ -159,8 +226,7 @@ def asignarColorDeEstado (estado):
     elif estado == CERRANDO:
         color = "#FF7F7F"
     else:
-        color = "error"
-
+        color = "#323232"
     return color
 
 # Logica de conexion a internet
@@ -204,7 +270,10 @@ except OSError as e:
     machine.reset()
 
 
-while True:
+# Le da un valor inicial al estado, ya que broker MQTT no envía el ultimo estado guardado.
+estado = calcularEstadoGuardado()
+
+while estado != FALLA_MECANICA:
     time.sleep_ms(1000)
 
     try:
@@ -213,16 +282,7 @@ while True:
         distSensA = round(sensorA.distance_cm())
         distSensC = round(sensorC.distance_cm())
 
-        difActSensA = abs(distAntSensA - distSensA) 
-        difActSensC = abs(distAntSensC - distSensC) 
-
-        if (comando == ABRIR):
-            calcularEstado(distSensA, distSensC, difActSensA, difAntSensA)
-        else:
-            calcularEstado(distSensA, distSensC, difActSensC, difAntSensC)
-
-        #print(comando)
-        #print(estadoACadena(estado))
+        calcularEstadoActual(distSensA, distSensC, distAntSensA, distAntSensC)
 
         estadoActual = estadoACadena(estado)
 
@@ -236,17 +296,10 @@ while True:
         # Publicar el color al dashboard
         if color != ultimoColorPublicado:
             conexionMQTT.publish(topicoLuz, color)
-            ultimoColorPublicado = color
-
-        if estadoActual == "Falla mecanica":
-            print("Falla mecanica del porton")
-            time.sleep(5)
-            machine.reset()            
+            ultimoColorPublicado = color      
 
         distAntSensA = distSensA
         distAntSensC = distSensC
-        difAntSensA = difActSensA
-        difAntSensC = difActSensC
 
     except OSError as e:
         print("Error de conexion: ", e)
